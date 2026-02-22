@@ -7,24 +7,23 @@ curl -s https://openrouter.ai/api/v1/chat/completions \
   "messages": [
     {
       "role": "user",
-      "content": "what'\''s the weather in munich? "
+      "content": "Could you check what is in this place?"
     }
   ],
   "tools": [
     {
       "type": "function",
       "function": {
-        "name": "get_weather",
-        "description": "Get the current weather in a given location",
+        "name": "run_command",
+        "description": "Run a shell command in the current location.",
         "parameters": 
           {
             "type": "object",
             "properties": 
               {
-                "location": {"type": "string", "description": "City and state, e.g., '\''San Francisco, CA'\''"},
-                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+                "command": {"type": "string", "description": "The shell command to be run"},
               },
-            "required": ["location", "unit"]
+            "required": ["command"]
          }
        }
      }
