@@ -1,22 +1,21 @@
-
 <div align="center">
-    ════════════════════════════
+    ═══════════════════════
     ║     The   Agent™    ║
-    ════════════════════════════
+    ═══════════════════════
 </div>
 
 ## installing
 In terminal:
 ```bash
 git clone git@github.com:ttesmer/theagent.git
-go build -o theagent/bin theagent/main.go
+make build
 ```
 
 In `~/.bashrc` (or `~/.zshrc`), assuming working directory was `$HOME`:
 ```bash
-export PATH="$PATH:$HOME/theagent"
+export PATH="$PATH:$HOME/theagent/bin"
 ```
-Or add the path to wherever you put the built binary.
+Or add the path to wherever you put the binary artifact.
 
 ## running
 Now you just type this wherever you are:

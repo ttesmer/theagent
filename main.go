@@ -202,6 +202,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				decided  := false
 				for !decided {
 					fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Allow? \u001b[3my/n\u001b[0m\n")
+					fmt.Print("\u001b[38;5;216mYou\u001b[0m: ")
 					userInput, ok := a.getUserMessage()
 					if !ok { break }
 					switch userInput {
