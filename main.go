@@ -165,7 +165,7 @@ func (c *Client) Generate(ctx context.Context, msg MessageBody) (OpenRouterRespo
 	}
 
 	if len(result.Choices) == 0 {
-			return OpenRouterResponse{}, fmt.Errorf("no choices in response\n")
+		return OpenRouterResponse{}, fmt.Errorf("No choices in response. Response: %s\n", resp.Body)
 	}
 
 	return OpenRouterResponse{
