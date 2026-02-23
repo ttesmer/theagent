@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"io"
 	"os/exec"
 	"net/http"
 	"encoding/json"
 	"bytes"
+	//"path/filepath"
 
 )
 
@@ -62,7 +64,30 @@ type Choice struct {
 }
 
 type OpenRouterResponse struct {
-    Choices []Choice `json:"choices"`
+		ID			 string   `json:"id"` 			// e.g. "gen-188832332-odwijod23"
+		Provider string   `json:"provider"` // e.g. "Moonshot AI"
+		Model 	 string   `json:"model"`    // e.g. "moonshotai/kimi-k2.5"
+		Object   string   `json:"object"`   // e.g. "chat.completion" (not sure what else)
+		Created  int64    `json:"created"`  // UNIX timestamp in seconds (date -r <date>)
+    Choices  []Choice `json:"choices"`
+		Usage    struct {
+			PromptTokens     int     `json:"prompt_tokens"`
+			CompletionTokens int     `json:"completion_tokens"`
+			TotalTokens      int     `json:"total_tokens"`
+			Cost             float32 `json:"cost"` // other dtype maybe
+			// other fields, maybe add later
+		}`json:"usage"`
+		SystemFingerprint string `json:"system_fingerprint"` // no idea about this
+		Error    *OpenRouterError `json:"error,omitempty"`
+}
+
+type OpenRouterError struct {
+	Message  string `json:"message"`
+	Code     int    `json:"code"`
+	Metadata struct {
+		Raw string `json:"raw"`
+		ProviderName string `json:"provider_name"`
+	} `json:"metadata"`
 }
 
 type MessageBody struct {
@@ -77,7 +102,6 @@ type Tool struct {
 	Function FunctionDef `json:"function"`
 }
 
-// This is for the LLM's context (I think)
 type FunctionDef struct { 
 	Name 				string `json:"name"`
 	Description string `json:"description"`
@@ -97,9 +121,13 @@ type FunctionCall struct {
 
 
 type Message struct {
-	Content   string     `json:"content"`
-	Role      string     `json:"role"` // "user", "assistant" or "tool"(!)
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role         string     `json:"role"` // "user", "assistant" or "tool"(!)
+	ToolName   	 string     `json:"name,omitempty"`
+	ToolCallId 	 string     `json:"tool_call_id,omitempty"`
+	Content      string     `json:"content"`
+	Refusal      bool       `json:"refusal,omitempty"`
+	Reasoning    string     `json:"reasoning,omitempty"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
 }
 
 func NewUserMessage(input string) Message {
@@ -110,7 +138,70 @@ func NewUserMessage(input string) Message {
 }
 
 
-func (a *Agent) runInference(ctx context.Context, conversation []Message) ([]Choice, error) {
+func (c *Client) Generate(ctx context.Context, msg MessageBody) (OpenRouterResponse, error){
+	API_URL := "https://openrouter.ai/api/v1/chat/completions"
+	API_KEY := os.Getenv("OPENROUTER_API_KEY")
+	if API_KEY == "" {
+		return OpenRouterResponse{}, fmt.Errorf("No API Key!\n")
+	}
+
+	reqBodyBytes, _ := json.Marshal(msg)
+
+	// Debug json request body
+	if os.Getenv("DEBUG") == "1" { 
+		var prettyReq bytes.Buffer
+		json.Indent(&prettyReq, reqBodyBytes, "", "  ")
+		fmt.Printf("DEBUG:\nRequest body:\n%s\n", prettyReq.String()) 
+	}
+
+	reqBody := bytes.NewReader(reqBodyBytes)
+
+	req, err := http.NewRequest("POST", API_URL, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+API_KEY)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return OpenRouterResponse{}, err
+	}
+
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+
+	// Debug http response body
+	if os.Getenv("DEBUG") == "1" {
+		var prettyResp bytes.Buffer
+		err = json.Indent(&prettyResp, responseBody, "", "  ")
+		if err != nil { fmt.Printf("JSON indenting failed") }
+		fmt.Printf("DEBUG:\nResponse body:\n%s\n", prettyResp.String()) 
+	}
+
+	var result OpenRouterResponse
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+			return OpenRouterResponse{}, err
+	}
+
+	// OpenRouter error handling
+	if result.Error != nil {
+		respError := result.Error
+		return OpenRouterResponse{}, fmt.Errorf(
+			"OpenRouter: %s (code: %d, provider: %s)\nRaw message from provider:\n%s\n",
+			respError.Message, respError.Code, respError.Metadata.ProviderName, respError.Metadata.Raw)
+	}
+	return result, err
+}
+
+func (a *Agent) runInference(ctx context.Context, conversation []Message) (OpenRouterResponse, error) {
+	// put this into different file 
+	// along with executeTool function
+	// and Tool struct
+	// and FunctionCall struct
+	// then just import `tools` and `executeTool`
+	// et voila, just add a tool definition here
+	// and a new pattern match in executeTool
+	// and you get a new tool!
 	var tools = []Tool{
 		{
 			Type: "function",
@@ -120,64 +211,55 @@ func (a *Agent) runInference(ctx context.Context, conversation []Message) ([]Cho
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"command": map[string]any{"type": "string", "description": "Command to run"},
+						"command": map[string]any{
+							"type": "string", 
+							"description": "Command to run",
+						},
 					},
 					"required": []string{"command"},
 				},
 			},
 		},
+		//{
+		//	Type: "function",
+		//	Function: FunctionDef{
+		//		Name: "display_to_user",
+		//		Description: "Render your gathered information in Markdown to user by plugging it into `display_info_user` argument as a string",
+		//		Parameters: map[string]any{
+		//			"type": "object",
+		//			"properties": map[string]any{
+		//				"display_info_user": map[string]any{
+		//					"type": "string", 
+		//					"description": "Markdown information to render to the user",
+		//				},
+		//				"display_info_subagent": map[string]any{
+		//					"type": "string", 
+		//					"description": "Metadata the subagent responsible for displaying the data might be interested in (optional)",
+		//				},
+		//			},
+		//			"required": []string{"display_info"},
+		//		},
+		//	},
+		//},
 	}
 	model := os.Getenv("MODEL")
 	if model == "" {
-		model = "minimax/minimax-m2.5"
+		model = "moonshotai/kimi-k2.5"
 	}
 	response, err := a.client.Generate(ctx, MessageBody{
 		Model: model,
 		Messages: conversation,
-		MaxTokens: int64(1024),
+		//MaxTokens: int64(1024),
 		Tools: tools,
 	})
-	return response.Choices, err
-}
-
-func (c *Client) Generate(ctx context.Context, msg MessageBody) (OpenRouterResponse, error){
-	API_URL := "https://openrouter.ai/api/v1/chat/completions"
-	jsonBytes, _ := json.Marshal(msg)
-	body := bytes.NewReader(jsonBytes)
-	req, err := http.NewRequest("POST", API_URL, body)
-	API_KEY := os.Getenv("OPENROUTER_API_KEY")
-	if API_KEY == "" {
-		return OpenRouterResponse{}, fmt.Errorf("No API Key!\n")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+API_KEY)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return OpenRouterResponse{}, err
-	}
-	defer resp.Body.Close()
-
-	var result OpenRouterResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return OpenRouterResponse{}, err
-	}
-
-	if len(result.Choices) == 0 {
-		return OpenRouterResponse{}, fmt.Errorf("No choices in response. Response: %s\n", resp.Body)
-	}
-
-	return OpenRouterResponse{
-		Choices: result.Choices,
-	}, err
+	return response, err
 }
 
 func (a *Agent) Run(ctx context.Context) error {
 	conversation := []Message{}
 
 	fmt.Println("Chat with The Agent (use 'ctrl-c' to quit)")
-	var doneUsingTools bool = true
+	var doneUsingTools = true
 	for {
 		if doneUsingTools {
 			fmt.Print("\u001b[38;5;216mYou\u001b[0m: ")
@@ -187,67 +269,117 @@ func (a *Agent) Run(ctx context.Context) error {
 			conversation = append(conversation, userMessage)
 		}
 
-		choices, err := a.runInference(ctx, conversation)
-		if err != nil {
-			return err
-		}
-		llmMessage := choices[0].Message
-		conversation = append(conversation, llmMessage)
-		if len(llmMessage.ToolCalls) == 0 {
-			fmt.Printf("\u001b[38;5;80mThe Agent\u001b[0m: %s\n", llmMessage.Content)
-		  doneUsingTools = true
-		} else {
-			for _, tool_call := range llmMessage.ToolCalls {
-				fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Agent requests action.\nid: %s\ntype: %s\nname: %s\narguments: %s\n", tool_call.ID, tool_call.Type, tool_call.Function.Name, tool_call.Function.Arguments)
-				decided  := false
-				for !decided {
-					fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Allow? \u001b[3my/n\u001b[0m\n")
-					fmt.Print("\u001b[38;5;216mYou\u001b[0m: ")
-					userInput, ok := a.getUserMessage()
-					if !ok { break }
-					switch userInput {
-					case "n":
-							fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Add a note for agent about refusal?\n")
-							fmt.Print("\u001b[38;5;216mYou\u001b[0m: ")
-							userInput, ok := a.getUserMessage()
-							if !ok { break }
-							conversation = append(conversation, 
-								Message{
-									Role: "tool",
-									Content: fmt.Sprintf("User refused tool_call %s (arguments: %s) with this note: \"%s\"", tool_call.Function.Name, tool_call.Function.Arguments, userInput),
-								},
-							)
-							decided = true
-						case "y":
-							fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Access granted, executing command.\n")
-							result := executeTool(tool_call.Function.Name, tool_call.Function.Arguments)
-							toolMsg := Message{
-								Role: "tool",
-								Content: result,
-							}
-							conversation = append(conversation, toolMsg)
-							decided = true
-						default:
-							continue
-					}
-				}
-			}
-			doneUsingTools = false
-		}
-	}
+		httpResponse, err := a.runInference(ctx, conversation)
+		if err != nil { return err }
 
+		llmMessage := httpResponse.Choices[0].Message
+		conversation = append(conversation, llmMessage)
+
+		// print reasoning trace
+		if llmMessage.Reasoning != "" {
+			fmt.Printf(
+				"\u001b[38;5;79mThe Agent's thoughts\u001b[0m: \u001b[38;5;245m%s\u001b[0m\n", 
+				llmMessage.Reasoning,
+			)
+		}
+
+		switch httpResponse.Choices[0].FinishReason {
+		case "tool_calls":
+			// loop over tool calls
+			doneUsingTools = false
+			toolCalls := llmMessage.ToolCalls
+			for _, toolCall := range toolCalls {
+				toolMessage := handleToolCall(conversation, toolCall, a)
+				conversation = append(conversation, toolMessage)
+			}
+		case "stop":
+			// respond if no more tool calls
+			fmt.Printf(
+				"\u001b[38;5;81mThe Agent\u001b[0m: %s\n", 
+				llmMessage.Content,
+			)
+			doneUsingTools = true
+		} 
+	}
 	return nil
 }
 
-func executeTool(name string, args string) string {
-	switch name {
+func handleToolCall(conversation []Message, toolCall ToolCall, a *Agent) Message {
+	toolResult := ""
+	if toolCall.Function.Name == "run_command" {
+		printShellCommand(toolCall)
+		approved, refusalNote := getUserApproval(a)
+		if approved {
+			toolResult = executeTool(toolCall.Function)
+		} else {
+			toolResult = fmt.Sprintf(
+				"User refused tool call %s with note: \"%s\"", 
+				toolCall.ID, refusalNote,
+			)
+		}
+	}
+	toolMsg := Message{
+		Role: "tool",
+		ToolName: toolCall.Function.Name,
+		ToolCallId: toolCall.ID,
+		Content: toolResult,
+	}
+	return toolMsg
+}
+
+func executeTool(function FunctionCall) string {
+	switch function.Name {
 	case "run_command":
 		var params struct{ Command string }
-		json.Unmarshal([]byte(args), &params) // see above what FunctionCall.Arguments is
-		out, _ := exec.Command("sh", "-c", params.Command).Output()
-		fmt.Printf("\u001b[38;5;80m$\u001b[0m %s\n%s\n", params.Command, out)
+		json.Unmarshal([]byte(function.Arguments), &params)
+		cmd := exec.Command("sh", "-c", params.Command)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return fmt.Sprintf("Error: %v\n", err)
+		}
+		fmt.Printf("%s", out)
 		return string(out)
+	case "display_to_user":
+		var params struct{ 
+			displayInfoUser string
+		  displayInfoSubagent string
+		}
+		json.Unmarshal([]byte(function.Arguments), &params)
+		fmt.Printf("For user display: %s ", params.displayInfoUser)
+		fmt.Printf("For subagent: %s ", params.displayInfoSubagent)
+		return "Passed display info along to subagent"
 	}
-	fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Function %s is not implemented or not in the cases.\n", name)
+	fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: ")
+	fmt.Printf("Function %s is not implemented or not in the cases.\n", function.Name)
 	return "unknown tool"
+}
+
+func printShellCommand(toolCall ToolCall) {
+		var shell struct { Command string }
+		json.Unmarshal([]byte(toolCall.Function.Arguments), &shell)
+		fmt.Printf("\u001b[38;5;80m$\u001b[0m %s ", shell.Command)
+}
+
+func getUserApproval(a *Agent) (bool, string) {
+	for {
+		userInput, ok := a.getUserMessage()
+		if !ok { 
+			return false, "" 
+		}
+		switch userInput {
+		case "":
+			return true, ""
+		case "n":
+			fmt.Printf("\u001b[38;5;80mSystem\u001b[0m: Add a note for agent about refusal?\n")
+			fmt.Print("\u001b[38;5;216mYou\u001b[0m: ")
+			refusalNote, ok := a.getUserMessage()
+			if !ok {
+				return false, ""
+			}
+			return false, refusalNote
+		default:
+			continue
+		}
+	}
 }

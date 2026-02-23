@@ -1,36 +1,36 @@
 <div align="center">
-    ═══════════════════════
+       ═════════════════
     ║     The   Agent™    ║
-    ═══════════════════════
+       ═════════════════
 </div>
 
 ## installing
 In terminal:
 ```bash
-git clone git@github.com:ttesmer/theagent.git
-make build
+git clone git@github.com:ttesmer/agent.git
+cd agent && make build
 ```
-
-In `~/.bashrc` (or `~/.zshrc`), assuming working directory was `$HOME`:
+The binary is in `agent/bin`, so add that to your path.
+Assuming you cloned in the home directory:
 ```bash
-export PATH="$PATH:$HOME/theagent/bin"
+export PATH="$PATH:$HOME/agent/bin"
 ```
 Or add the path to wherever you put the binary artifact.
 
 ## running
 Now you just type this wherever you are:
 ```bash
-agent
+$ agent
 ```
 and will get:
 ```bash
-mac:~ $ agent
+$ agent
 Chat with The Agent (use 'ctrl-c' to quit)
 You: yo you there?
 Error:
 No API Key!
 ```
-Whoops, don't forget to have the `API_KEY` somewhere in your environment:
+Whoops, don't forget to add the `API_KEY` somewhere in your environment:
 ```bash
 export OPENROUTER_API_KEY=<YOUR_SECRET_KEY>
 ```
